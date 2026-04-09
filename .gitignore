@@ -30,3 +30,4 @@ test-vault/untracked/*
 lib
 yarn.lock
 main.js
+data.json

@@ -90,6 +90,11 @@ export interface DataviewSettings extends QuerySettings, ExportSettings {
     prettyRenderInlineFieldsInLivePreview: boolean;
     /** The keyword for DataviewJS blocks. */
     dataviewJsKeyword: string;
+    /**
+     * If true, a JSON snapshot of the parsed index is stored in plugin `data.json` (key `diskIndexSnapshot`) and reused
+     * on startup when the Dataview version and each file's modification time still match.
+     */
+    persistIndexToDisk: boolean;
 }
 
 /** Default settings for dataview on install. */
@@ -106,5 +111,6 @@ export const DEFAULT_SETTINGS: DataviewSettings = {
         prettyRenderInlineFields: true,
         prettyRenderInlineFieldsInLivePreview: true,
         dataviewJsKeyword: "dataviewjs",
+        persistIndexToDisk: false,
     },
 };

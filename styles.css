@@ -14,10 +14,6 @@
 .table-view-root {
     width: 100%;
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    border: var(--bases-table-container-border-width, 0) solid
-        var(--bases-table-border-color, var(--background-modifier-border));
-    border-radius: var(--bases-table-container-border-radius, var(--radius-s, var(--radius-m, 0)));
 }
 
 .table-view-table {
@@ -29,6 +25,7 @@
     background-color: var(--table-background, var(--background-primary));
     border: var(--bases-table-container-border-width, var(--table-border-width, 1px)) solid
         var(--bases-table-border-color, var(--table-border-color, var(--background-modifier-border)));
+    cursor: default;
 }
 
 .table-view-table > thead > tr,
@@ -40,12 +37,9 @@
     height: var(--bases-table-row-height, auto);
 }
 
-.table-view-table > tbody > tr:nth-child(even) {
-    background-color: var(--table-row-alt-background, transparent);
-}
-
-.table-view-table > tbody > tr:hover {
+.markdown-rendered .table-view-table > tbody > tr:hover {
     background-color: var(--bases-table-row-background-hover, var(--table-row-background-hover));
+    cursor: default;
 }
 
 .table-view-table > thead > tr > th {

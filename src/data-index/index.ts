@@ -8,13 +8,41 @@ import { DataObject } from "data-model/value";
 import { DateTime } from "luxon";
 import { App, Component, MetadataCache, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
 import { getParentFolder, setsEqual } from "util/normalize";
+import {
+    buildDiskSnapshotObject,
+    DiskSnapshotFileV1,
+    snapshotDataToPartial,
+} from "data-index/disk-snapshot";
 
 /** Aggregate index which has several sub-indices and will initialize all of them. */
 export class FullIndex extends Component {
     /** Generate a full index from the given vault. */
-    public static create(app: App, indexVersion: string, onChange: () => void): FullIndex {
-        return new FullIndex(app, indexVersion, onChange);
+    public static create(
+        app: App,
+        indexVersion: string,
+        onChange: () => void,
+        requestPersistDiskSnapshot?: () => void,
+        writeIndexSnapshot?: (snapshot: DiskSnapshotFileV1 | null) => Promise<void>
+    ): FullIndex {
+        return new FullIndex(app, indexVersion, onChange, requestPersistDiskSnapshot, writeIndexSnapshot);
     }
+
+    /**
+     * When true, the index snapshot is merged into the plugin's `data.json` (debounced) and read on startup when the
+     * Dataview version and per-file mtimes match.
+     */
+    public diskIndexPersistence: boolean = false;
+
+    /** Snapshot from the last `loadData()` call; consumed during the first `_initialize`. */
+    private startupEmbeddedSnapshot: DiskSnapshotFileV1 | undefined;
+
+    /** Set before `initialize()` when loading snapshot from `data.json`. */
+    public setStartupEmbeddedSnapshot(snap: DiskSnapshotFileV1 | undefined): void {
+        this.startupEmbeddedSnapshot = snap;
+    }
+
+    /** When set, in-memory updates do not enqueue a debounced disk snapshot (used during full re-index). */
+    private suspendDiskSnapshotPersist: boolean = false;
 
     /** Whether all files in the vault have been indexed at least once. */
     public initialized: boolean;
@@ -53,7 +81,13 @@ export class FullIndex extends Component {
     public importer: FileImporter;
 
     /** Construct a new index using the app data and a current data version. */
-    private constructor(public app: App, public indexVersion: string, public onChange: () => void) {
+    private constructor(
+        public app: App,
+        public indexVersion: string,
+        public onChange: () => void,
+        private requestPersistDiskSnapshot?: () => void,
+        private writeIndexSnapshot?: (snapshot: DiskSnapshotFileV1 | null) => Promise<void>
+    ) {
         super();
 
         this.initialized = false;
@@ -121,20 +155,34 @@ export class FullIndex extends Component {
 
     /** Drops the local storage cache and re-indexes all files; this should generally be used if you expect cache issues. */
     public async reinitialize() {
-        await this.persister.recreate();
+        this.suspendDiskSnapshotPersist = true;
+        try {
+            await this.persister.recreate();
+            await this.clearPersistedIndexSnapshot();
 
-        const files = this.vault.getMarkdownFiles();
-        const start = Date.now();
-        let promises = files.map(file => this.reload(file));
+            const files = this.vault.getMarkdownFiles();
+            const start = Date.now();
+            let promises = files.map(file => this.reload(file));
 
-        await Promise.all(promises);
-        console.log(`Dataview: re-initialized index with ${files.length} files (${(Date.now() - start) / 1000.0}s)`);
+            await Promise.all(promises);
+            console.log(`Dataview: re-initialized index with ${files.length} files (${(Date.now() - start) / 1000.0}s)`);
+        } finally {
+            this.suspendDiskSnapshotPersist = false;
+            if (this.diskIndexPersistence) await this.saveDiskSnapshot();
+        }
     }
 
     /** Internal asynchronous initializer. */
     private async _initialize(files: TFile[]) {
         let reloadStart = Date.now();
-        let promises = files.map(l => this.reload(l));
+
+        let fromDisk = new Set<string>();
+        if (this.diskIndexPersistence) fromDisk = this.tryHydrateFromEmbeddedSnapshot(files);
+
+        let diskHydrated = fromDisk.size;
+        let promises = files.map(l =>
+            fromDisk.has(l.path) ? Promise.resolve({ cached: false, skipped: false }) : this.reload(l)
+        );
         let results = await Promise.all(promises);
 
         let cached = 0,
@@ -153,7 +201,7 @@ export class FullIndex extends Component {
         console.log(
             `Dataview: all ${files.length} files have been indexed in ${
                 (Date.now() - reloadStart) / 1000.0
-            }s (${cached} cached, ${skipped} skipped).`
+            }s (${cached} cached, ${skipped} skipped${diskHydrated ? `, ${diskHydrated} from data.json snapshot` : ""}).`
         );
 
         // Drop keys for files which do not exist anymore.
@@ -161,6 +209,58 @@ export class FullIndex extends Component {
         if (remaining.size > 0) {
             console.log(`Dataview: Dropped cache entries for ${remaining.size} deleted files.`);
         }
+
+        if (this.diskIndexPersistence) await this.saveDiskSnapshot();
+    }
+
+    /** Write the in-memory index into plugin `data.json` via the host (if persistence is enabled). */
+    public async saveDiskSnapshot(): Promise<void> {
+        if (!this.diskIndexPersistence || !this.initialized) return;
+        try {
+            await this.writeIndexSnapshot?.(buildDiskSnapshotObject(this.indexVersion, this.pages));
+        } catch (e) {
+            console.error("Dataview: failed to save index snapshot to data.json", e);
+        }
+    }
+
+    /** Drop the snapshot from plugin `data.json` (e.g. when clearing cache or disabling the option). */
+    public async clearPersistedIndexSnapshot(): Promise<void> {
+        try {
+            await this.writeIndexSnapshot?.(null);
+        } catch (e) {
+            console.error("Dataview: failed to clear index snapshot in data.json", e);
+        }
+    }
+
+    /** Load matching pages from the embedded `data.json` snapshot into memory without re-parsing. */
+    private tryHydrateFromEmbeddedSnapshot(files: TFile[]): Set<string> {
+        let empty = new Set<string>();
+        if (files.length === 0) return empty;
+
+        let snap = this.startupEmbeddedSnapshot;
+        this.startupEmbeddedSnapshot = undefined;
+        if (!snap || snap.dataviewVersion !== this.indexVersion) return empty;
+
+        let loaded = new Set<string>();
+        for (let file of files) {
+            let entry = snap.files[file.path];
+            if (!entry) continue;
+            if (entry.mtime !== file.stat.mtime) continue;
+
+            try {
+                let partial = snapshotDataToPartial(entry.data);
+                if (!partial.path) partial.path = file.path;
+                this.finishQuiet(file, partial);
+                loaded.add(file.path);
+            } catch {
+                // Corrupt entry; fall back to normal indexing for this file.
+            }
+        }
+
+        if (loaded.size === 0) return empty;
+
+        this.touch();
+        return loaded;
     }
 
     public rename(file: TAbstractFile, oldPath: string) {
@@ -220,8 +320,8 @@ export class FullIndex extends Component {
         });
     }
 
-    /** Finish the reloading of file metadata by adding it to in memory indexes. */
-    private finish(file: TFile, parsed: Partial<PageMetadata>) {
+    /** Merge parsed metadata into the in-memory maps without notifying views. */
+    private finishQuiet(file: TFile, parsed: Partial<PageMetadata>) {
         let meta = PageMetadata.canonicalize(parsed, link => {
             let realPath = this.metadataCache.getFirstLinkpathDest(link.path, file.path);
             if (realPath) return link.withPath(realPath.path);
@@ -232,9 +332,16 @@ export class FullIndex extends Component {
         this.tags.set(file.path, meta.fullTags());
         this.etags.set(file.path, meta.tags);
         this.links.set(file.path, new Set<string>(meta.links.map(l => l.path)));
+    }
 
+    /** Finish the reloading of file metadata by adding it to in memory indexes. */
+    private finish(file: TFile, parsed: Partial<PageMetadata>) {
+        this.finishQuiet(file, parsed);
         this.touch();
         this.trigger("update", file);
+        if (this.diskIndexPersistence && this.initialized && !this.suspendDiskSnapshotPersist) {
+            this.requestPersistDiskSnapshot?.();
+        }
     }
 }
 

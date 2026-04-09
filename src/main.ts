@@ -4,6 +4,7 @@ import {
     debounce,
     MarkdownPostProcessorContext,
     MarkdownView,
+    normalizePath,
     Plugin,
     PluginSettingTab,
     Setting,
@@ -14,6 +15,12 @@ import { FullIndex } from "data-index/index";
 import { parseField } from "expression/parse";
 import { tryOrPropagate } from "util/normalize";
 import { DataviewApi, isDataviewDisabled } from "api/plugin-api";
+import {
+    DiskSnapshotFileV1,
+    parseDiskSnapshotObject,
+    PLUGIN_DATA_INDEX_SNAPSHOT_KEY,
+    buildDiskSnapshotObject,
+} from "data-index/disk-snapshot";
 import { DataviewSettings, DEFAULT_QUERY_SETTINGS, DEFAULT_SETTINGS } from "settings";
 import { DataviewInlineRenderer } from "ui/views/inline-view";
 import { DataviewInlineJSRenderer } from "ui/views/js-view";
@@ -42,16 +49,43 @@ export default class DataviewPlugin extends Plugin {
     /** CodeMirror 6 extensions that dataview installs. Tracked via array to allow for dynamic updates. */
     private cmExtension: Extension[];
 
+    /** Debounced write of the optional vault-local disk index snapshot. */
+    private scheduleDiskIndexSave: () => void = () => null;
+
+    /** Snapshot read from `data.json` before init finishes; kept when saving settings so we do not wipe it early. */
+    private pendingDiskSnapshot: DiskSnapshotFileV1 | undefined;
+
     async onload() {
-        // Settings initialization; write defaults first time around.
-        this.settings = Object.assign(DEFAULT_SETTINGS, (await this.loadData()) ?? {});
+        // Settings + optional index snapshot share plugin `data.json`.
+        let raw = (await this.loadData()) ?? {};
+        let snapRaw = (raw as Record<string, unknown>)[PLUGIN_DATA_INDEX_SNAPSHOT_KEY];
+        let { [PLUGIN_DATA_INDEX_SNAPSHOT_KEY]: _snap, ...settingsRest } = raw as Record<string, unknown>;
+        this.settings = Object.assign(DEFAULT_SETTINGS, settingsRest);
+        let embeddedSnapshot = parseDiskSnapshotObject(snapRaw) ?? undefined;
+        this.pendingDiskSnapshot = embeddedSnapshot;
+
         this.addSettingTab(new GeneralSettingsTab(this.app, this));
+        void this.removeLegacyDiskIndexFile();
+
+        this.scheduleDiskIndexSave = debounce(() => void this.index.saveDiskSnapshot(), 15_000, true);
 
         this.index = this.addChild(
-            FullIndex.create(this.app, this.manifest.version, () => {
-                if (this.settings.refreshEnabled) this.debouncedRefresh();
-            })
+            FullIndex.create(
+                this.app,
+                this.manifest.version,
+                () => {
+                    if (this.settings.refreshEnabled) this.debouncedRefresh();
+                },
+                () => {
+                    if (this.settings.persistIndexToDisk) this.scheduleDiskIndexSave();
+                },
+                async (snapshot: DiskSnapshotFileV1 | null) => {
+                    await this.persistPluginPayload(snapshot);
+                }
+            )
         );
+        this.index.diskIndexPersistence = this.settings.persistIndexToDisk;
+        this.index.setStartupEmbeddedSnapshot(embeddedSnapshot);
 
         // Set up automatic (intelligent) view refreshing that debounces.
         this.updateRefreshSettings();
@@ -148,6 +182,10 @@ export default class DataviewPlugin extends Plugin {
         // Not required anymore, though holding onto it for backwards-compatibility.
         this.app.metadataCache.trigger("dataview:api-ready", this.api);
         console.log(`Dataview: version ${this.manifest.version} (requires obsidian ${this.manifest.minAppVersion})`);
+
+        this.register(() => {
+            if (this.settings.persistIndexToDisk) void this.index.saveDiskSnapshot();
+        });
 
         // Mainly intended to detect when the user switches between live preview and source mode.
         this.registerEvent(
@@ -304,9 +342,49 @@ export default class DataviewPlugin extends Plugin {
 
     /** Update plugin settings. */
     async updateSettings(settings: Partial<DataviewSettings>) {
+        let wasDisk = this.settings.persistIndexToDisk;
         Object.assign(this.settings, settings);
+        this.index.diskIndexPersistence = this.settings.persistIndexToDisk;
         this.updateRefreshSettings();
-        await this.saveData(this.settings);
+
+        if (wasDisk && !this.settings.persistIndexToDisk) {
+            await this.persistPluginPayload(null);
+        } else {
+            await this.persistPluginPayload();
+        }
+    }
+
+    /**
+     * Write `data.json`: always current settings; include index snapshot when enabled and initialized, unless
+     * `snapshotOverride === null` (strip snapshot only) or a concrete snapshot object (from {@link FullIndex}).
+     */
+    async persistPluginPayload(snapshotOverride?: DiskSnapshotFileV1 | null): Promise<void> {
+        let payload: Record<string, unknown> = { ...this.settings };
+        if (snapshotOverride === null) {
+            this.pendingDiskSnapshot = undefined;
+            delete payload[PLUGIN_DATA_INDEX_SNAPSHOT_KEY];
+        } else if (snapshotOverride !== undefined) {
+            payload[PLUGIN_DATA_INDEX_SNAPSHOT_KEY] = snapshotOverride;
+            if (this.index.initialized) this.pendingDiskSnapshot = undefined;
+        } else if (this.settings.persistIndexToDisk && this.index.initialized) {
+            payload[PLUGIN_DATA_INDEX_SNAPSHOT_KEY] = buildDiskSnapshotObject(this.manifest.version, this.index.pages);
+            this.pendingDiskSnapshot = undefined;
+        } else if (this.settings.persistIndexToDisk && this.pendingDiskSnapshot) {
+            payload[PLUGIN_DATA_INDEX_SNAPSHOT_KEY] = this.pendingDiskSnapshot;
+        } else {
+            delete payload[PLUGIN_DATA_INDEX_SNAPSHOT_KEY];
+        }
+        await this.saveData(payload);
+    }
+
+    /** One-time cleanup: older builds wrote `disk-index.json` via the vault adapter (often failed if the folder did not exist). */
+    private async removeLegacyDiskIndexFile(): Promise<void> {
+        try {
+            let legacy = normalizePath(`${this.app.vault.configDir}/plugins/dataview/disk-index.json`);
+            if (await this.app.vault.adapter.exists(legacy)) await this.app.vault.adapter.remove(legacy);
+        } catch {
+            /* ignore */
+        }
     }
 
     /** @deprecated Call the given callback when the dataview API has initialized. */
@@ -434,6 +512,22 @@ class GeneralSettingsTab extends PluginSettingTab {
                 toggle
                     .setValue(this.plugin.settings.inlineQueriesInCodeblocks)
                     .onChange(async value => await this.plugin.updateSettings({ inlineQueriesInCodeblocks: value }))
+            );
+
+        new Setting(this.containerEl).setName("Index").setHeading();
+
+        new Setting(this.containerEl)
+            .setName("Persist index snapshot on disk")
+            .setDesc(
+                "Store a JSON copy of the parsed index in the plugin data file (`data.json` next to this plugin). " +
+                    "After restart, Dataview reuses entries when this plugin version and each file's modified time still match, " +
+                    "so unchanged notes skip re-parsing. Very large vaults make `data.json` large. Turn off to remove the snapshot " +
+                    "from that file, or use \"Drop all cached file metadata\" to clear caches and rebuild."
+            )
+            .addToggle(toggle =>
+                toggle.setValue(this.plugin.settings.persistIndexToDisk).onChange(async value => {
+                    await this.plugin.updateSettings({ persistIndexToDisk: value });
+                })
             );
 
         new Setting(this.containerEl).setName("View").setHeading();
