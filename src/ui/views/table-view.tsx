@@ -36,29 +36,31 @@ export function TableGrouping({
 
     return (
         <Fragment>
-            <table class="dataview table-view-table">
-                <thead class="table-view-thead">
-                    <tr class="table-view-tr-header">
-                        {headings.map((heading, index) => (
-                            <th class="table-view-th">
-                                <Markdown sourcePath={sourcePath} content={heading} />
-                                {index == 0 && <ResultCount length={values.length} />}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody class="table-view-tbody">
-                    {values.map(row => (
-                        <tr>
-                            {row.map(element => (
-                                <td>
-                                    <Lit value={element} sourcePath={sourcePath} />
-                                </td>
+            <div class="table-view-root">
+                <table class="dataview table-view-table">
+                    <thead class="table-view-thead">
+                        <tr class="table-view-tr-header">
+                            {headings.map((heading, index) => (
+                                <th class="table-view-th">
+                                    <Markdown sourcePath={sourcePath} content={heading} />
+                                    {index == 0 && <ResultCount length={values.length} />}
+                                </th>
                             ))}
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody class="table-view-tbody">
+                        {values.map(row => (
+                            <tr>
+                                {row.map(element => (
+                                    <td>
+                                        <Lit value={element} sourcePath={sourcePath} />
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
             {settings.warnOnEmptyResult && values.length == 0 && (
                 <ErrorMessage message="Dataview: No results to show for table query." />
             )}

@@ -2,44 +2,120 @@
     overflow-y: auto;
 }
 
+.internal-embed .block-language-dataview {
+    border: var(--bases-embed-border-width) solid var(--bases-embed-border-color);
+    border-radius: var(--bases-embed-border-radius);
+}
+
 /*****************/
 /** Table Views **/
 /*****************/
 
-/* List View Default Styling; rendered internally as a table. */
-.table-view-table {
+.table-view-root {
     width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: var(--bases-table-container-border-width, 0) solid
+        var(--bases-table-border-color, var(--background-modifier-border));
+    border-radius: var(--bases-table-container-border-radius, var(--radius-s, var(--radius-m, 0)));
 }
 
-.table-view-table > thead > tr, .table-view-table > tbody > tr {
-    margin-top: 1em;
-    margin-bottom: 1em;
+.table-view-table {
+    width: 100%;
+    margin: 0;
+    border-collapse: collapse;
+    border-spacing: 0;
+    white-space: var(--table-white-space, normal);
+    background-color: var(--table-background, var(--background-primary));
+    border: var(--bases-table-container-border-width, var(--table-border-width, 1px)) solid
+        var(--bases-table-border-color, var(--table-border-color, var(--background-modifier-border)));
+}
+
+.table-view-table > thead > tr,
+.table-view-table > tbody > tr {
     text-align: left;
+}
+
+.table-view-table > tbody > tr {
+    height: var(--bases-table-row-height, auto);
+}
+
+.table-view-table > tbody > tr:nth-child(even) {
+    background-color: var(--table-row-alt-background, transparent);
 }
 
 .table-view-table > tbody > tr:hover {
-    background-color: var(--table-row-background-hover);
+    background-color: var(--bases-table-row-background-hover, var(--table-row-background-hover));
 }
 
 .table-view-table > thead > tr > th {
-    font-weight: 700;
-    font-size: larger;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-    border-bottom: solid;
+    font-weight: var(--bases-table-header-weight, var(--table-header-weight, 600));
+    font-size: var(--bases-table-font-size, var(--table-text-size, var(--font-text-size)));
+    color: var(--bases-table-header-color, var(--table-header-color, var(--text-normal)));
+    text-align: left;
+    vertical-align: bottom;
+    background-color: var(--bases-table-header-background, var(--table-header-background, var(--background-secondary)));
+    padding-block: 0.4375em;
+    border: var(--bases-table-column-border-width, var(--table-border-width, 1px)) solid
+        var(--bases-table-border-color, var(--table-border-color, var(--background-modifier-border)));
+    border-bottom-width: var(--bases-header-border-width, var(--bases-table-column-border-width, var(--table-border-width, 1px)));
+    max-width: var(--bases-table-column-max-width, 100%);
+    min-width: var(--bases-table-column-min-width, 0);
+}
 
-    max-width: 100%;
+.table-view-table > thead > tr > th:hover {
+    background-color: var(--bases-table-header-background-hover, var(--bases-table-header-background, var(--table-header-background, var(--background-secondary))));
 }
 
 .table-view-table > tbody > tr > td {
-    text-align: left;
-    border: none;
     font-weight: 400;
-    max-width: 100%;
+    color: var(--text-normal);
+    text-align: left;
+    vertical-align: top;
+    border: var(--bases-table-column-border-width, var(--table-border-width, 1px)) solid
+        var(--bases-table-border-color, var(--table-border-color, var(--background-modifier-border)));
+    border-bottom-width: var(--bases-table-row-border-width, var(--bases-table-column-border-width, var(--table-border-width, 1px)));
+    max-width: var(--bases-table-column-max-width, 100%);
+    font-size: var(--bases-table-font-size);
+    min-width: var(--bases-table-column-min-width, 0);
+    padding-block: 0.4375em;
+    height: var(--bases-table-row-height, auto);
 }
 
-.table-view-table ul, .table-view-table ol {
+/* Cell interaction states — no-op when Bases variables are unset */
+.table-view-table > tbody > tr > td:active,
+.table-view-table > tbody > tr > td.is-active {
+    border-radius: var(--bases-table-cell-radius-active);
+    box-shadow: var(--bases-table-cell-shadow-active);
+    background-color: var(--bases-table-cell-background-active);
+}
+
+.table-view-table > tbody > tr > td:focus,
+.table-view-table > tbody > tr > td:focus-within {
+    border-radius: var(--bases-table-cell-radius-focus);
+    box-shadow: var(--bases-table-cell-shadow-focus);
+}
+
+.table-view-table > tbody > tr > td[aria-selected="true"] {
+    background-color: var(--bases-table-cell-background-selected);
+}
+
+.table-view-table > tbody > tr > td[aria-disabled="true"],
+.table-view-table > tbody > tr > td.is-disabled {
+    background-color: var(--bases-table-cell-background-disabled);
+}
+
+/* Summary row (forward-compatible) */
+.table-view-table > tfoot > tr > td {
+    background-color: var(--bases-table-summary-background, var(--table-header-background, var(--background-secondary)));
+}
+
+.table-view-table > tfoot > tr:hover > td {
+    background-color: var(--bases-table-summary-background-hover, var(--bases-table-summary-background, var(--background-secondary)));
+}
+
+.table-view-table ul,
+.table-view-table ol {
     margin-block-start: 0.2em !important;
     margin-block-end: 0.2em !important;
 }
@@ -58,6 +134,22 @@
 /** Generic grouping styling. */
 .dataview.result-group {
     padding-left: 8px;
+    background-color: var(--bases-table-group-background, transparent);
+}
+
+h4:has(+ .dataview.result-group),
+h5:has(+ .dataview.result-group),
+h6:has(+ .dataview.result-group) {
+    font-size: var(--bases-group-heading-value-size, inherit);
+    font-weight: var(--bases-group-heading-value-weight, var(--bold-weight, 600));
+    color: var(--bases-group-heading-property-color, var(--text-normal));
+    display: var(--bases-group-heading-property-display, block);
+}
+
+.dataview.result-group + h4,
+.dataview.result-group + h5,
+.dataview.result-group + h6 {
+    margin-top: var(--bases-table-group-gap, 1em);
 }
 
 /*******************/
@@ -127,6 +219,7 @@ div.dataview-error-box {
 /*************************/
 
 .dataview.small-text {
+    display: var(--bases-toolbar-badge-display, inline);
     font-size: smaller;
     color: var(--text-muted);
     margin-left: 3px;
