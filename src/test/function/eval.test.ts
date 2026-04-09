@@ -2,6 +2,7 @@
 
 import { EXPRESSION } from "expression/parse";
 import { Context, LinkHandler } from "expression/context";
+import "expression/functions";
 import { Duration } from "luxon";
 import { Fields } from "expression/field";
 import { Literal, Link } from "data-model/value";

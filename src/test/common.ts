@@ -1,5 +1,6 @@
 import { Literal } from "data-model/value";
 import { Context, LinkHandler } from "expression/context";
+import "expression/functions";
 import { EXPRESSION } from "expression/parse";
 import { DEFAULT_QUERY_SETTINGS } from "settings";
 

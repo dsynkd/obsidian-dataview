@@ -4,20 +4,15 @@ import { DateTime } from "luxon";
 import { LiteralType, Link, Literal, Values, Widgets } from "data-model/value";
 import { currentLocale } from "util/locale";
 import { LiteralReprAll, LiteralTypeOrAll } from "./binaryop";
-import { Context } from "./context";
+import { Context, registerDefaultFunctions } from "./context";
 import { Fields } from "./field";
 import { EXPRESSION } from "./parse";
 import { escapeRegex, normalizeMarkdown } from "util/normalize";
 import { DataArray } from "api/data-array";
 import { cyrb53 } from "util/hash";
 
-/**
- * A function implementation which takes in a function context and a variable number of arguments. Throws an error if an
- * invalid number/type of arguments are passed.
- */
-export type FunctionImpl = (context: Context, ...rest: Literal[]) => Literal;
-/** A "bound" function implementation which has already had a function context passed to it. */
-export type BoundFunctionImpl = (...args: Literal[]) => Literal;
+export type { FunctionImpl, BoundFunctionImpl } from "./context";
+import type { FunctionImpl, BoundFunctionImpl } from "./context";
 
 /** A function variant used in the function builder which holds the argument types. */
 interface FunctionVariant {
@@ -970,3 +965,5 @@ export const DEFAULT_FUNCTIONS: Record<string, FunctionImpl> = {
     hash: DefaultFunctions.hash,
     meta: DefaultFunctions.meta,
 };
+
+registerDefaultFunctions(DEFAULT_FUNCTIONS);

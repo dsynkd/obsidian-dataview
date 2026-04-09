@@ -4,8 +4,23 @@ import { DataObject, Literal, Values } from "data-model/value";
 import { Result } from "api/result";
 import { BinaryOpHandler, createBinaryOps } from "./binaryop";
 import { Field, Fields } from "./field";
-import { DEFAULT_FUNCTIONS, FunctionImpl } from "./functions";
 import { QuerySettings } from "settings";
+
+/**
+ * A function implementation which takes in a function context and a variable number of arguments. Throws an error if an
+ * invalid number/type of arguments are passed.
+ */
+export type FunctionImpl = (context: Context, ...rest: Literal[]) => Literal;
+/** A "bound" function implementation which has already had a function context passed to it. */
+export type BoundFunctionImpl = (...args: Literal[]) => Literal;
+
+/** Module-level default functions, populated via registerDefaultFunctions(). */
+let registeredDefaultFunctions: Record<string, FunctionImpl> = {};
+
+/** Called from functions.ts at load time to supply DEFAULT_FUNCTIONS without a circular import. */
+export function registerDefaultFunctions(fns: Record<string, FunctionImpl>) {
+    registeredDefaultFunctions = fns;
+}
 
 /** Handles link resolution and normalization inside of a context. */
 export interface LinkHandler {
@@ -25,6 +40,8 @@ export interface LinkHandler {
  * for binary operators.
  */
 export class Context {
+    public functions: Record<string, FunctionImpl>;
+
     /**
      * Create a new context with the given namespace of globals, as well as optionally with custom binary operator, function,
      * and link handlers.
@@ -34,8 +51,10 @@ export class Context {
         public settings: QuerySettings,
         public globals: Record<string, Literal> = {},
         public binaryOps: BinaryOpHandler = createBinaryOps(linkHandler.normalize),
-        public functions: Record<string, FunctionImpl> = DEFAULT_FUNCTIONS
-    ) {}
+        functions?: Record<string, FunctionImpl>
+    ) {
+        this.functions = functions ?? registeredDefaultFunctions;
+    }
 
     /** Set a global value in this context. */
     public set(name: string, value: Literal): Context {

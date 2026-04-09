@@ -3,6 +3,7 @@
  */
 import { FullIndex } from "data-index/index";
 import { Context, LinkHandler } from "expression/context";
+import "expression/functions";
 import { resolveSource, Datarow, matchingSourcePaths } from "data-index/resolver";
 import { DataObject, Link, Literal, Values, Grouping, Widgets } from "data-model/value";
 import { CalendarQuery, ListQuery, Query, QueryOperation, TableQuery } from "query/query";

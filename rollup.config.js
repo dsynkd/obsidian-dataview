@@ -8,8 +8,8 @@ const BASE_CONFIG = {
     input: "src/main.ts",
     external: ["obsidian", "@codemirror/view", "@codemirror/state", "@codemirror/language"],
     onwarn: (warning, warn) => {
-        // Sorry rollup, but we're using eval...
         if (/Use of eval is strongly discouraged/.test(warning.message)) return;
+        if (warning.code === "CIRCULAR_DEPENDENCY" && warning.ids?.every(id => id.includes("node_modules/"))) return;
         warn(warning);
     },
 };
@@ -45,7 +45,7 @@ const DEV_PLUGIN_CONFIG = {
 const PROD_PLUGIN_CONFIG = {
     ...BASE_CONFIG,
     output: {
-        dir: "build",
+        dir: ".",
         sourcemap: "inline",
         sourcemapExcludeSources: true,
         format: "cjs",
